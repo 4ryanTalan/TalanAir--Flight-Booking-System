@@ -207,8 +207,9 @@ public class FlightBookingSystem extends JFrame {
     // ==========================================
     // CUSTOM DESTINATION CARD COMPONENT
     // ==========================================
-        class DestinationCard extends JPanel {
+    class DestinationCard extends JPanel {
         private String destinationName;
+        private String searchQuery;
         private String priceHint;
         private Image bgImage;
 
@@ -216,8 +217,9 @@ public class FlightBookingSystem extends JFrame {
         private float targetScale = 1.0f;
         private Timer animTimer;
 
-        public DestinationCard(String dest, String priceHint, String imagePath) {
+        public DestinationCard(String dest, String searchQuery, String priceHint, String imagePath) {
             this.destinationName = dest;
+            this.searchQuery = searchQuery;
             this.priceHint = priceHint;
 
             // Load the image from your local system
@@ -250,85 +252,84 @@ public class FlightBookingSystem extends JFrame {
                     animTimer.start();
                 }
                 @Override public void mouseClicked(MouseEvent e) {
-                    openSearchForDestination(destinationName);
+                    openSearchForDestination(searchQuery);
                 }
             });
         }
 
         @Override
         protected void paintComponent(Graphics g) {
+            // Call super first so Swing clears dirty pixels — prevents scroll ghosting.
+            super.paintComponent(g);
+
             Graphics2D g2d = (Graphics2D) g.create();
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-            // Apply scale transform from the center
-            double cx = getWidth() / 2.0;
-            double cy = getHeight() / 2.0;
-            AffineTransform at = new AffineTransform();
-            at.translate(cx, cy);
-            at.scale(scale, scale);
-            at.translate(-cx, -cy);
-            g2d.transform(at);
+            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
             int shadowOffset = 4;
-            int cardWidth = getWidth() - shadowOffset * 2;
+            int cardX      = shadowOffset;
+            int cardY      = shadowOffset;
+            int cardWidth  = getWidth()  - shadowOffset * 2;
             int cardHeight = getHeight() - shadowOffset * 2;
+            int arc        = 24;
 
-            // Draw drop shadow
+            // --- Drop shadow (fixed, never scales) ---
             g2d.setColor(new Color(0, 0, 0, 30));
-            g2d.fillRoundRect(shadowOffset, shadowOffset, cardWidth, cardHeight, 24, 24);
+            g2d.fillRoundRect(cardX + 4, cardY + 4, cardWidth, cardHeight, arc, arc);
 
-            // Create the rounded shape for the card
-            Shape cardShape = new RoundRectangle2D.Double(0, 0, cardWidth, cardHeight, 24, 24);
+            // --- Card shape (fixed rounded rect — this never moves) ---
+            Shape cardShape = new RoundRectangle2D.Double(cardX, cardY, cardWidth, cardHeight, arc, arc);
 
-            // Clip the graphics context so the image doesn't spill over the rounded corners
-            g2d.setClip(cardShape);
+            // Clip strictly to the card shape so the image can't bleed outside the corners.
+            Shape originalClip = g2d.getClip();
+            g2d.clip(cardShape);
 
-            // Draw the downloaded image
+            // --- Background image — zoomed by expanding draw rect around center ---
             if (bgImage != null) {
-
                 int imgW = bgImage.getWidth(null);
                 int imgH = bgImage.getHeight(null);
 
-                double scale = Math.max(
-                        (double) cardWidth / imgW,
+                // Base scale to fill the card
+                double baseScale = Math.max(
+                        (double) cardWidth  / imgW,
                         (double) cardHeight / imgH
                 );
+                // Apply the hover zoom on top of the base scale
+                double totalScale = baseScale * scale;
 
-                int drawW = (int) (imgW * scale);
-                int drawH = (int) (imgH * scale);
+                int drawW = (int) (imgW * totalScale);
+                int drawH = (int) (imgH * totalScale);
 
-                int x = (cardWidth - drawW) / 2;
-                int y = (cardHeight - drawH) / 2;
+                // Centre the (possibly zoomed) image within the card
+                int imgX = cardX + (cardWidth  - drawW) / 2;
+                int imgY = cardY + (cardHeight - drawH) / 2;
 
-                g2d.drawImage(bgImage, x, y, drawW, drawH, null);
-            }
-            else {
-                // Fallback color if image fails to load
+                g2d.drawImage(bgImage, imgX, imgY, drawW, drawH, null);
+            } else {
                 g2d.setColor(SLATE_GRAY);
-                g2d.fillRect(0, 0, cardWidth, cardHeight);
+                g2d.fill(cardShape);
             }
 
-            // Draw a dark gradient overlay at the bottom so white text is always readable
+            // --- Gradient overlay (clipped inside card) ---
             GradientPaint overlay = new GradientPaint(
-                    0, cardHeight / 2.0f, new Color(0, 0, 0, 0),
-                    0, cardHeight, new Color(0, 0, 0, 200)
+                    0, cardY + cardHeight / 2.0f, new Color(0, 0, 0, 0),
+                    0, cardY + cardHeight,         new Color(0, 0, 0, 200)
             );
             g2d.setPaint(overlay);
             g2d.fill(cardShape);
 
-            // Reset the clip before drawing text
-            g2d.setClip(null);
+            // Restore clip so text isn't cut off
+            g2d.setClip(originalClip);
 
-            // Draw Text
+            // --- Text (always at fixed positions, never scales) ---
             g2d.setColor(PURE_WHITE);
             g2d.setFont(new Font("SansSerif", Font.BOLD, 28));
-            int textX = 20;
-            g2d.drawString(destinationName, textX, getHeight() - 80);
+            g2d.drawString(destinationName, cardX + 16, getHeight() - 76);
 
             g2d.setFont(new Font("SansSerif", Font.PLAIN, 16));
-            g2d.drawString("Flights from " + priceHint, textX, getHeight() - 50);
+            g2d.drawString("Flights from " + priceHint, cardX + 16, getHeight() - 50);
 
-            // Icon/Arrow
             g2d.setFont(new Font("SansSerif", Font.BOLD, 20));
             g2d.drawString("➔", getWidth() - 45, getHeight() - 50);
 
@@ -394,12 +395,12 @@ public class FlightBookingSystem extends JFrame {
             cardsPanel.setOpaque(false);
 
             // Add Destination Cards (Replace the paths with the actual locations on your computer)
-            cardsPanel.add(new DestinationCard("Japan", "₹68K", "img/japan.jpeg"));
-            cardsPanel.add(new DestinationCard("France", "₹65K", "img/france.jpeg"));
-            cardsPanel.add(new DestinationCard("UK", "₹59K", "img/uk.jpeg"));
-            cardsPanel.add(new DestinationCard("Maldives", "₹17K", "img/maldives.jpg"));
-            cardsPanel.add(new DestinationCard("UAE", "₹18K", "img/uae.jpeg"));
-            cardsPanel.add(new DestinationCard("Australia", "₹76K", "img/australia.jpg"));
+            cardsPanel.add(new DestinationCard("Japan",     "Japan",                "₹68K", "img/japan.jpeg"));
+            cardsPanel.add(new DestinationCard("France",    "France",               "₹65K", "img/france.jpeg"));
+            cardsPanel.add(new DestinationCard("UK",        "United Kingdom",       "₹59K", "img/uk.jpeg"));
+            cardsPanel.add(new DestinationCard("Maldives",  "Maldives",             "₹17K", "img/maldives.jpg"));
+            cardsPanel.add(new DestinationCard("UAE",       "United Arab Emirates", "₹18K", "img/uae.jpeg"));
+            cardsPanel.add(new DestinationCard("Australia", "Australia",            "₹76K", "img/australia.jpg"));
 
             // Horizontal Scroll Pane for Cards
             JScrollPane scrollPane = new JScrollPane(cardsPanel);
